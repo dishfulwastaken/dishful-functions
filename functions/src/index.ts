@@ -8,15 +8,29 @@ const corsMiddleware = cors(corsOptions);
 
 export const dishful_function_fetch_html = https.onRequest((request, response) => {
   corsMiddleware(request, response, async () => {
-    const url = request.body.data
-    logger.info("URL: " + url)
+    try {
+      const url = getUrl(request)
+      logger.info("URL: " + url)
+  
+      const fetchResponse = await fetch(url);
+      const html = await fetchResponse.text();
 
-    const fetchResponse = await fetch(url);
-    const data = await fetchResponse.text();
+      response.status(200).send({ "data": html })
+    } catch (error) {
+      const message = (error as Error)?.message ?? "An unknown error occurred."
 
-    response.send({ data })
+      response.status(500).send({ "data": message })
+    }
   })
 })
+
+const getUrl = (request: https.Request) => {
+  const url = request.body.data
+  if (!url) throw Error("Request body.data must be defined.")
+  if (typeof url != "string") throw Error("Request body.data must be a string.")
+
+  return url
+}
 
 // const validateFirebaseIdToken = async (req, res, next) => {
 //   logger.log('Check if request is authorized with Firebase ID token');
