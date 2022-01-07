@@ -1,5 +1,6 @@
-import { https, logger } from "firebase-functions"
-// import { auth } from "firebase-admin"
+import { HttpStatusError, BadRequestError, ForbiddenError, InternalServerError } from "http-status-errors"
+import { https } from "firebase-functions"
+import { auth } from "firebase-admin"
 import cors from "cors"
 import fetch from "node-fetch"
 
@@ -9,61 +10,62 @@ const corsMiddleware = cors(corsOptions);
 export const dishful_function_fetch_html = https.onRequest((request, response) => {
   corsMiddleware(request, response, async () => {
     try {
+      const token = getToken(request)
+      const claims = await getClaims(token)
+
+      if (!claims.uid) throw new ForbiddenError("Unauthorized")
+
       const url = getUrl(request)
-      logger.info("URL: " + url)
-  
-      const fetchResponse = await fetch(url);
-      const html = await fetchResponse.text();
+      const text = await getText(url)
+      const html = await getHtml(text);
 
-      response.status(200).send({ "data": html })
+      response.send({ "data": html })
     } catch (error) {
-      const message = (error as Error)?.message ?? "An unknown error occurred."
+      const { message, status } = error as HttpStatusError
 
-      response.status(500).send({ "data": message })
+      response.status(status).send({ "data": message })
     }
   })
 })
 
 const getUrl = (request: https.Request) => {
   const url = request.body.data
-  if (!url) throw Error("Request body.data must be defined.")
-  if (typeof url != "string") throw Error("Request body.data must be a string.")
+  if (!url) throw new BadRequestError("Request body.data must be defined.")
+  if (typeof url != "string") throw new BadRequestError("Request body.data must be a string.")
 
   return url
 }
 
-// const validateFirebaseIdToken = async (req, res, next) => {
-//   logger.log('Check if request is authorized with Firebase ID token');
+const getToken = (request: https.Request) => {
+  const token = request.headers.authorization?.split("Bearer ")?.[1]
+  if (!token) throw new BadRequestError("Request headers.authorization is either undefined or incorrectly formatted.")
 
-//   if ((!req.headers.authorization || !req.headers.authorization.startsWith('Bearer ')) &&
-//       !(req.cookies && req.cookies.__session)) {
-//     res.status(403).send('Unauthorized');
-//     return;
-//   }
+  return token
+}
 
-//   let idToken;
-//   if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
-//     logger.log('Found "Authorization" header');
-//     // Read the ID Token from the Authorization header.
-//     idToken = req.headers.authorization.split('Bearer ')[1];
-//   } else if(req.cookies) {
-//     logger.log('Found "__session" cookie');
-//     // Read the ID Token from cookie.
-//     idToken = req.cookies.__session;
-//   } else {
-//     // No cookie
-//     res.status(403).send('Unauthorized');
-//     return;
-//   }
+const getClaims = async (token: string) => {
+  const { verifyIdToken } = auth()
 
-//   try {
-//     const decodedIdToken = await auth().verifyIdToken(idToken);
-//     logger.log('ID Token correctly decoded', decodedIdToken);
-//     req.user = decodedIdToken;
-//     return;
-//   } catch (error) {
-//     logger.error('Error while verifying Firebase ID token:', error);
-//     res.status(403).send('Unauthorized');
-//     return;
-//   }
-// };
+  try {
+    return await verifyIdToken(token)
+  } catch (error) {
+    throw new InternalServerError("An error occurred while verifying token.")
+  }
+}
+
+const getText = async (url: string) => {
+  try {
+    const { text } = await fetch(url);
+    return text
+  } catch (error) {
+    throw new InternalServerError("An error occurred while fetching URL.")
+  }
+}
+
+const getHtml = async (text: () => Promise<string>) => {
+  try {
+    return await text();
+  } catch (error) {
+    throw new InternalServerError("An error occurred while getting HTML.")
+  }
+}
