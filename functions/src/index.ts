@@ -1,9 +1,10 @@
 import { HttpStatusError, BadRequestError, ForbiddenError, InternalServerError } from "http-status-errors"
-import { https } from "firebase-functions"
-import { auth } from "firebase-admin"
+import { https, logger } from "firebase-functions"
+import { auth, initializeApp } from "firebase-admin"
 import cors from "cors"
 import fetch from "node-fetch"
 
+const app = initializeApp()
 const corsOptions: cors.CorsOptions = { origin: true }
 const corsMiddleware = cors(corsOptions);
 
@@ -16,14 +17,14 @@ export const dishful_function_fetch_html = https.onRequest((request, response) =
       if (!claims.uid) throw new ForbiddenError("Unauthorized")
 
       const url = getUrl(request)
-      const text = await getText(url)
-      const html = await getHtml(text);
+      const fetchResponse = await getResponse(url)
+      const html = await getHtml(fetchResponse);
 
       response.send({ "data": html })
     } catch (error) {
       const { message, status } = error as HttpStatusError
 
-      response.status(status).send({ "data": message })
+      response.status(status ?? 500).send({ "data": message ?? "An unknown error occurred." })
     }
   })
 })
@@ -44,28 +45,30 @@ const getToken = (request: https.Request) => {
 }
 
 const getClaims = async (token: string) => {
-  const { verifyIdToken } = auth()
+  const authService = auth(app)
 
   try {
-    return await verifyIdToken(token)
+    return await authService.verifyIdToken(token)
   } catch (error) {
+    logger.error(error)
     throw new InternalServerError("An error occurred while verifying token.")
   }
 }
 
-const getText = async (url: string) => {
+const getResponse = async (url: string) => {
   try {
-    const { text } = await fetch(url);
-    return text
+    return await fetch(url);
   } catch (error) {
+    logger.error(error)
     throw new InternalServerError("An error occurred while fetching URL.")
   }
 }
 
-const getHtml = async (text: () => Promise<string>) => {
+const getHtml = async (response: fetch.Response) => {
   try {
-    return await text();
+    return await response.text();
   } catch (error) {
+    logger.error(error)
     throw new InternalServerError("An error occurred while getting HTML.")
   }
 }
